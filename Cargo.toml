@@ -1,0 +1,18 @@
+[package]
+name = "realworld-tide"
+version = "0.1.0"
+authors = ["Paulo Coelho <9609090+prscoelho@users.noreply.github.com>"]
+edition = "2018"
+
+[dependencies]
+tide = "0.16.0"
+async-std = { version = "1.9.0", features = ["attributes"] }
+jsonwebtoken = "7.2.0"
+bcrypt = "0.10"
+sqlx = { version = "0.5", features = ["postgres", "runtime-async-std-rustls"] }
+serde = {version = "1.0", features = ["derive"] }
+lazy_static = "1.4.0"
+chrono = "0.4"
+dotenv = "0.15.0"
+anyhow = "1.0"
+validator = { version = "0.14", features = ["derive"] }
