@@ -56,10 +56,19 @@ fn validate_request<State: Clone + Send + Sync + 'static>(request: &Request<Stat
     }
 }
 
-pub fn generate_token(sub: i32, name: String, exp: i64) -> anyhow::Result<String> {
-    let claims = Claims { sub, name, exp };
+pub fn generate_token(sub: i32, name: &str) -> String {
+    let exp = chrono::Utc::now()
+        .checked_add_signed(chrono::Duration::days(60))
+        .unwrap()
+        .timestamp();
 
-    encode(&Header::default(), &claims, &ENCODINGKEY).map_err(Into::into)
+    let claims = Claims {
+        sub,
+        exp,
+        name: name.into(),
+    };
+
+    encode(&Header::default(), &claims, &ENCODINGKEY).unwrap()
 }
 
 pub fn verify_password(plain_password: &str, hashed_password: &str) -> bool {

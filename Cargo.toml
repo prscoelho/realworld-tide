@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 tide = "0.16.0"
-async-std = { version = "1.9.0", features = ["attributes"] }
+async-std = { version = "1.9.0", features = ["attributes", "unstable"] }
 jsonwebtoken = "7.2.0"
 bcrypt = "0.10"
 sqlx = { version = "0.5", features = ["postgres", "runtime-async-std-rustls"] }
@@ -16,3 +16,4 @@ chrono = "0.4"
 dotenv = "0.15.0"
 anyhow = "1.0"
 validator = { version = "0.14", features = ["derive"] }
+async-lock = "2.4.0"

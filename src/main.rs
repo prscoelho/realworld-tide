@@ -8,13 +8,40 @@ mod database;
 mod error;
 mod msg;
 
+use std::sync::Arc;
+
 use tide::utils::After;
+use async_std::task::spawn_blocking;
+use async_lock::Semaphore;
+
+#[derive(Clone)]
+pub struct State {
+    pub db: database::Database,
+    pub blocking_semaphore: Arc<Semaphore>,
+}
+
+// same constraints as `spawn_blocking`
+pub async fn heavy_computation<F, T>
+(semaphore: &Arc<Semaphore>, f: F) -> T
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    let _lock = semaphore.acquire_arc().await;
+    spawn_blocking(f).await
+}
 
 #[async_std::main]
 async fn main() -> tide::Result<()> {
     tide::log::start();
     dotenv::dotenv().unwrap();
-    let mut app = tide::with_state(database::Database::new().await);
+
+    let state = State {
+        db: database::Database::new().await,
+        blocking_semaphore: Arc::new(Semaphore::new(8)),
+    };
+
+    let mut app = tide::with_state(state);
     app.with(After(error::error_middleware));
 
     app.at("/api/users/login").post(routes::login);
@@ -32,22 +59,25 @@ mod routes {
     use tide::{Body, Request, Response, StatusCode};
     use validator::Validate;
 
-    use crate::auth::AuthId;
-    use crate::database::Database;
+    use crate::auth::{verify_password, AuthId};
     use crate::error::{convert_error_validation, AppError, AppErrors};
-
     use crate::msg::{LoginUserRequest, NewUserRequest, UpdateUserRequest};
+    use crate::{heavy_computation, State};
 
-    pub async fn login(mut req: Request<Database>) -> tide::Result<Response> {
+    pub async fn login(mut req: Request<State>) -> tide::Result<Response> {
         // 422 on failure
         let LoginUserRequest { login_user } = req.body_json().await?;
 
         // grab user from Database and validate password
-        let user = match req.state().get_user_by_email(&login_user.email).await {
+        let user = match req.state().db.get_user_by_email(&login_user.email).await {
             Ok(user) => user,
             Err(_) => return Err(tide::Error::from(AppError::InvalidLogin)),
         };
-        if !user.compare_password(&login_user.password) {
+
+        let hash = user.hash.clone();
+        let valid_password = heavy_computation(&req.state().blocking_semaphore, move || verify_password(&login_user.password, &hash)).await;
+
+        if ! valid_password {
             return Err(tide::Error::from(AppError::InvalidLogin));
         }
         // generate token and create user response
@@ -55,21 +85,21 @@ mod routes {
         Body::from_json(&user_response).map(Into::into)
     }
 
-    pub async fn get_user(req: Request<Database>) -> tide::Result<Body> {
+    pub async fn get_user(req: Request<State>) -> tide::Result<Body> {
         let AuthId(id) = *req.ext().unwrap();
 
-        let user = req.state().get_user_by_id(id).await?;
+        let user = req.state().db.get_user_by_id(id).await?;
 
         let user_response = user.to_user_response();
         Body::from_json(&user_response)
     }
 
-    pub async fn register_user(mut req: Request<Database>) -> tide::Result<tide::Response> {
+    pub async fn register_user(mut req: Request<State>) -> tide::Result<tide::Response> {
         let NewUserRequest { new_user } = req.body_json().await?;
 
         new_user.validate().map_err(convert_error_validation)?;
 
-        let db = req.state();
+        let db = &req.state().db;
 
         let mut db_errors = AppErrors::new();
 
@@ -83,7 +113,8 @@ mod routes {
             return Err(tide::Error::from(db_errors));
         }
 
-        let hash = crate::auth::generate_password(&new_user.password)?;
+        let plain_password = new_user.password.clone();
+        let hash = heavy_computation(&req.state().blocking_semaphore, move || crate::auth::generate_password(&plain_password)).await?;
 
         let user = db
             .register_user(new_user.email, new_user.username, hash)
@@ -96,7 +127,7 @@ mod routes {
         Ok(response)
     }
 
-    pub async fn update_user(mut req: Request<Database>) -> tide::Result<Response> {
+    pub async fn update_user(mut req: Request<State>) -> tide::Result<Response> {
         let AuthId(id) = *req.ext().unwrap();
 
         let UpdateUserRequest { update_user } = req.body_json().await?;
@@ -107,7 +138,7 @@ mod routes {
             Some(pass) => Some(crate::auth::generate_password(&pass)?),
             None => None,
         };
-        let user = req.state().update_user(id, update_user, hash).await?;
+        let user = req.state().db.update_user(id, update_user, hash).await?;
 
         let user_response = user.to_user_response();
         Body::from_json(&user_response).map(Into::into)

@@ -1,31 +1,23 @@
 // Database table structs and database layer methods
 use sqlx::postgres::PgPool;
 
-use crate::auth;
+use crate::auth::generate_token;
 use crate::msg::{UpdateUser, UserJson, UserResponse};
 
 // User table in database
+#[derive(Clone)]
 pub struct User {
     pub id: i32,
     pub email: String,
     pub username: String,
     pub bio: Option<String>,
     pub image: Option<String>,
-    hash: String,
+    pub hash: String,
 }
 
 impl User {
-    fn token(&self) -> String {
-        let expires = chrono::Utc::now()
-            .checked_add_signed(chrono::Duration::days(60))
-            .unwrap()
-            .timestamp();
-
-        auth::generate_token(self.id, self.username.clone(), expires).unwrap()
-    }
-
     pub fn to_user_response(self) -> UserResponse {
-        let token = self.token();
+        let token = generate_token(self.id, &self.username);
         UserResponse {
             user: UserJson {
                 email: self.email,
@@ -35,10 +27,6 @@ impl User {
                 image: self.image,
             },
         }
-    }
-
-    pub fn compare_password(&self, plain_password: &str) -> bool {
-        auth::verify_password(plain_password, &self.hash)
     }
 }
 
