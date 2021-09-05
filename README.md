@@ -32,13 +32,9 @@ Since our sql statements are being verified at compile time, the database must b
 
 `docker-compose up -d`
 
-## Set environment var
-
-Change the IP of DATABASE_URL in the .env file to the correct docker ip
-
 ## Running
 
-With the database up and DATABASE_URL set correctly:
+With the database up:
 
 `cargo run --release`
 
