@@ -10,9 +10,9 @@ mod msg;
 
 use std::sync::Arc;
 
-use tide::utils::After;
-use async_std::task::spawn_blocking;
 use async_lock::Semaphore;
+use async_std::task::spawn_blocking;
+use tide::utils::After;
 
 #[derive(Clone)]
 pub struct State {
@@ -21,8 +21,7 @@ pub struct State {
 }
 
 // same constraints as `spawn_blocking`
-pub async fn heavy_computation<F, T>
-(semaphore: &Arc<Semaphore>, f: F) -> T
+pub async fn heavy_computation<F, T>(semaphore: &Arc<Semaphore>, f: F) -> T
 where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
@@ -59,7 +58,7 @@ mod routes {
     use tide::{Body, Request, Response, StatusCode};
     use validator::Validate;
 
-    use crate::auth::{verify_password, AuthId};
+    use crate::auth::{generate_password, verify_password, AuthId};
     use crate::error::{convert_error_validation, AppError, AppErrors};
     use crate::msg::{LoginUserRequest, NewUserRequest, UpdateUserRequest};
     use crate::{heavy_computation, State};
@@ -75,9 +74,12 @@ mod routes {
         };
 
         let hash = user.hash.clone();
-        let valid_password = heavy_computation(&req.state().blocking_semaphore, move || verify_password(&login_user.password, &hash)).await;
+        let valid_password = heavy_computation(&req.state().blocking_semaphore, move || {
+            verify_password(&login_user.password, &hash)
+        })
+        .await;
 
-        if ! valid_password {
+        if !valid_password {
             return Err(tide::Error::from(AppError::InvalidLogin));
         }
         // generate token and create user response
@@ -114,7 +116,10 @@ mod routes {
         }
 
         let plain_password = new_user.password.clone();
-        let hash = heavy_computation(&req.state().blocking_semaphore, move || crate::auth::generate_password(&plain_password)).await?;
+        let hash = heavy_computation(&req.state().blocking_semaphore, move || {
+            generate_password(&plain_password)
+        })
+        .await?;
 
         let user = db
             .register_user(new_user.email, new_user.username, hash)
@@ -135,7 +140,7 @@ mod routes {
         update_user.validate().map_err(convert_error_validation)?;
 
         let hash = match update_user.password.as_ref() {
-            Some(pass) => Some(crate::auth::generate_password(&pass)?),
+            Some(pass) => Some(generate_password(&pass)?),
             None => None,
         };
         let user = req.state().db.update_user(id, update_user, hash).await?;
